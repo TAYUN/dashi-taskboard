@@ -149,6 +149,15 @@ test("launcher mode proves service identity and hides every route behind its ins
   const publicApi = await request(baseUrl, "/api/projects");
   assert.equal(publicApi.response.status, 404);
 
+  // 本机浏览器直接打开根路径（README 的默认地址）时，应被引导到带令牌的入口，
+  // 而不是留在空白 404 页上；程序化访问 /api/* 仍保持 404。
+  const rootNavigation = await request(baseUrl, "/", {
+    headers: { accept: "text/html" },
+    redirect: "manual",
+  });
+  assert.equal(rootNavigation.response.status, 302);
+  assert.equal(rootNavigation.response.headers.get("location"), `/${instanceToken}/`);
+
   const launcherApi = await request(baseUrl, `/${instanceToken}/api/projects`, {
     headers: { origin: "null" },
   });

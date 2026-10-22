@@ -1735,6 +1735,19 @@ export function createTaskboardServer(options = {}) {
           response.end();
           return;
         }
+        // 令牌模式下按 README 的默认地址直接打开根路径会落到 404，浏览器只看到空白页，
+        // 很容易被误判成「任务丢失」。这里仅对来自本机、且以 HTML 导航方式访问根路径的请求
+        // 重定向到带令牌的入口；其它来源与 /api/* 一律保持 404，避免把实例令牌暴露给局域网。
+        if (
+          incomingUrl.pathname === "/"
+          && request.method === "GET"
+          && isLoopbackAddress(request.socket.remoteAddress)
+          && String(request.headers.accept ?? "").includes("text/html")
+        ) {
+          response.writeHead(302, { location: `${routePrefix}/` });
+          response.end();
+          return;
+        }
         if (
           incomingUrl.pathname !== routePrefix
           && !incomingUrl.pathname.startsWith(`${routePrefix}/`)
