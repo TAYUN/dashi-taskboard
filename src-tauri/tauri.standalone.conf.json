@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Codex Taskboard Standalone",
+  "version": "1.1.27",
+  "identifier": "com.tayun.codex-taskboard-standalone",
+  "app": {
+    "windows": []
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "category": "Productivity",
+    "shortDescription": "本地任务面板的独立桌面窗口，不依赖 Codex",
+    "createUpdaterArtifacts": false,
+    "externalBin": ["binaries/node"],
+    "resources": {
+      "resources/": ""
+    },
+    "icon": ["../web/public/codex-app-icon.png", "icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

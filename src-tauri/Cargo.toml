@@ -8,6 +8,10 @@ rust-version = "1.88"
 [build-dependencies]
 tauri-build = { version = "2.6.0", features = [] }
 
+
+[features]
+standalone = []
+
 [dependencies]
 futures-util = "0.3"
 libc = "0.2"

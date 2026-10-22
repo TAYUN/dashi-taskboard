@@ -2350,7 +2350,7 @@ async fn offer_update(
     }
 }
 
-fn main() {
+fn launcher_main() {
     #[cfg(target_os = "macos")]
     let macos_bundle_migration = match migrate_macos_beta_app_bundle_name() {
         Ok(migration) => migration,
@@ -2730,4 +2730,18 @@ fn main() {
         }
         _ => {}
     });
+}
+
+#[cfg(feature = "standalone")]
+mod standalone;
+
+fn main() {
+    #[cfg(feature = "standalone")]
+    {
+        standalone::run();
+    }
+    #[cfg(not(feature = "standalone"))]
+    {
+        launcher_main();
+    }
 }
