@@ -28,7 +28,7 @@ For development with live frontend reload:
 npm run dev
 ```
 
-The Vite UI runs at <http://127.0.0.1:5173> and proxies API requests to the local service.
+The Vite UI runs at <http://127.0.0.1:47824> and proxies API requests to the local service.
 
 ## Use the CLI
 

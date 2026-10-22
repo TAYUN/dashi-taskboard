@@ -12,7 +12,8 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 5173,
+    // 固定使用不常见的端口，避免与其它 Vite 任务抢占常用的 5173。
+    port: 47824,
     strictPort: true,
     proxy: {
       "/api": "http://127.0.0.1:47823",

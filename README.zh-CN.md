@@ -28,7 +28,7 @@ npm start
 npm run dev
 ```
 
-Vite UI 运行在 <http://127.0.0.1:5173>，并将 API 请求代理到本地服务。
+Vite UI 运行在 <http://127.0.0.1:47824>，并将 API 请求代理到本地服务。
 
 ## 使用 CLI
 

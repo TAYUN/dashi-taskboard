@@ -1,12 +1,16 @@
 import { spawn } from "node:child_process";
 
+// Windows 上 Node 不允许直接 spawn .cmd（会抛 EINVAL），因此把整条命令交给 shell 执行。
+const webDev =
+  process.platform === "win32"
+    ? spawn("npm.cmd run dev:web", { stdio: "inherit", shell: true })
+    : spawn("npm", ["run", "dev:web"], { stdio: "inherit" });
+
 const children = [
   spawn(process.execPath, ["--watch", "server/index.mjs", "--dev"], {
     stdio: "inherit",
   }),
-  spawn(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "dev:web"], {
-    stdio: "inherit",
-  }),
+  webDev,
 ];
 
 let shuttingDown = false;
