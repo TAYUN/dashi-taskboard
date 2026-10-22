@@ -2352,11 +2352,8 @@ export function App() {
     ) as Record<TaskStatus, Task[]>;
   }, [filteredTasks]);
 
-  const mainBoardItems = boardDisplaySettings.mainStatuses.filter(
-    (status) => status !== "blocked"
-      || !hasLoadedTasks
-      || tasks.some((task) => task.status === "blocked"),
-  );
+  // 所有状态列常驻显示：「遇到障碍」不再按是否存在 blocked 任务特殊隐藏。
+  const mainBoardItems = boardDisplaySettings.mainStatuses;
   const mainColumnCount = Math.max(mainBoardItems.length, 1);
   const mainBoardMinWidth = (mainColumnCount * 300) + ((mainColumnCount - 1) * 24);
   const mainBoardMaxWidth = (mainColumnCount * 400) + ((mainColumnCount - 1) * 24);
