@@ -1,26 +1,15 @@
 import type { AgentPlatform } from "./types";
+import {
+  agentPlatformLabel as platformLabel,
+  agentResumeCommand,
+} from "../../shared/agents.mjs";
 
 export function agentPlatformLabel(platform: AgentPlatform | "codex") {
-  switch (platform) {
-    case "codex": return "Codex";
-    case "claude": return "Claude Code";
-    case "pi": return "Pi";
-    case "agy": return "Google Antigravity (AGY)";
-    case "grok": return "Grok";
-  }
+  return platformLabel(platform);
 }
 
-// These are fixed CLI entry points, not user-configurable command templates.
-// Quote for POSIX shells (sh/bash/zsh); preserve the complete, original argument.
+// Resume commands are fixed CLI entry points defined per platform in
+// shared/agents.mjs, not user-configurable command templates.
 export function sessionResumeCommand(platform: AgentPlatform | "codex", sessionId: string) {
-  const argument = /^[A-Za-z0-9_./:@+-]+$/.test(sessionId)
-    ? sessionId
-    : "'" + sessionId.replace(/'/g, "'\"'\"'") + "'";
-  switch (platform) {
-    case "codex": return `codex resume ${argument}`;
-    case "claude": return `claude --resume ${argument}`;
-    case "pi": return `pi --session ${argument}`;
-    case "agy": return `agy --conversation ${argument}`;
-    case "grok": return `grok --resume ${argument}`;
-  }
+  return agentResumeCommand(platform, sessionId) ?? sessionId;
 }

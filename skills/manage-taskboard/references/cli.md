@@ -52,7 +52,7 @@ taskctl cloud logout [--json]
 
 `cloud login` reads the shared password from a private `Shared key:` prompt. The actor name is the display attribution sent through Basic Authentication. The local companion stores its configuration with mode `0600`; project mappings stay on the current device and can differ between collaborators. In cloud mode, failed upstream writes fail rather than falling back to or double-writing the local SQLite database.
 
-Every issue or comment write requires conversation attribution. For Codex, `taskctl` reads `CODEX_THREAD_ID` or accepts explicit `--thread-id ID` (which takes precedence). For Claude Code, Pi, Google Antigravity CLI (AGY), and xAI Grok CLI, pass **both** `--agent-platform claude|pi|agy|grok` and `--session-id ID`. External attribution ignores `CODEX_THREAD_ID` and cannot be combined with `--thread-id`. No external session environment variables are inferred. Read commands do not require a conversation ID.
+Every issue or comment write requires conversation attribution. For Codex, `taskctl` reads `CODEX_THREAD_ID` or accepts explicit `--thread-id ID` (which takes precedence). For every other agent, pass **both** `--agent-platform PLATFORM` and `--session-id ID`. Supported platforms are `claude`, `codebuddy`, `omp`, `cline`, `command-code`, `pi`, `agy`, and `grok`; run `taskctl issue --help` for the current list. The platform also decides the actor identity, so a CodeBuddy write is recorded as CodeBuddy rather than Codex. External attribution ignores `CODEX_THREAD_ID` and cannot be combined with `--thread-id`. No external session environment variables are inferred. Read commands do not require a conversation ID.
 
 Except for built-in help, every successful command writes one JSON object with `schemaVersion` to stdout. The current schema version is `2`. Errors write one JSON object to stderr. Exit codes are `0` for success, `2` for invalid input, `3` when the service is unavailable, `4` for API or response errors, and `5` for conflicts.
 
@@ -68,7 +68,7 @@ taskctl issue update ISSUE_ID --if-version N \
   --agent-platform pi --session-id '/absolute/session path/session.jsonl' --json
 
 taskctl comment add ISSUE_ID --body 'Implementation notes' \
-  --agent-platform agy --session-id '<conversation-id>' --json
+  --agent-platform codebuddy --session-id '<codebuddy-session-id>' --json
 
 taskctl comment update COMMENT_ID --body 'Updated implementation notes' --if-version N \
   --agent-platform grok --session-id '<grok-session-id>' --json
@@ -126,7 +126,7 @@ taskctl issue create \
 
 Statuses are `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, and `canceled`. Priorities are `none`, `urgent`, `high`, `medium`, and `low`.
 
-Issues created through `taskctl` are assigned to Codex Agent by default. Other CLI writes preserve the existing assignee.
+Issues created through `taskctl` are assigned to the writing agent: Codex writes use Codex Agent, and a write made with `--agent-platform codebuddy` (for example) is recorded as CodeBuddy. Other CLI writes preserve the existing assignee.
 
 ## Update issues
 

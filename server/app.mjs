@@ -31,6 +31,7 @@ import {
   TASK_STATUSES,
 } from "../shared/domain.mjs";
 import { resolveCodexExecutable } from "../shared/codex-executable.mjs";
+import { agentActor, agentActorForId } from "../shared/agents.mjs";
 import { withoutTaskboardLauncherEnvironment } from "../shared/codex-environment.mjs";
 import { AiChatService } from "./ai-chat.mjs";
 import { resolveAiWorkspace, resolveMappedAiWorkspace } from "./ai-chat-catalog.mjs";
@@ -68,12 +69,8 @@ const INLINE_ATTACHMENT_TYPES = new Set([
 const PROJECT_BOARD_DISPLAY_SETTINGS_KEY_PREFIX = "taskboard.project-board-display-settings.v3.";
 const TRUSTED_EMBED_ORIGINS = new Set(["app://-"]);
 const TRUSTED_ORIGINS_ENV = "CODEX_TASKBOARD_TRUSTED_ORIGINS";
-const CODEX_AGENT_ACTOR = {
-  type: "agent",
-  id: "codex-agent",
-  name: "Codex Agent",
-  avatarUrl: null,
-};
+const AGENT_PLATFORM_HEADER = "x-taskboard-agent-platform";
+const CODEX_AGENT_ACTOR = agentActor("codex");
 const CONTENT_TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -396,7 +393,13 @@ function requestHeader(request, name) {
 
 function actorFromRequest(request) {
   if (request.headers["x-taskboard-client"] === "taskctl") {
-    return CODEX_AGENT_ACTOR;
+    const platform = requestHeader(request, AGENT_PLATFORM_HEADER);
+    if (platform === undefined) return CODEX_AGENT_ACTOR;
+    const agent = agentActor(platform);
+    if (!agent) {
+      throw new ApiError(400, "INVALID_ACTOR", `Unsupported agent platform '${platform}'`);
+    }
+    return agent;
   }
 
   const rawId = requestHeader(request, "x-taskboard-user-id");
@@ -443,7 +446,8 @@ function actorFromRequest(request) {
 
 function resolveAssignee(target, actor) {
   if (target === undefined) return actor;
-  if (target === "codex-agent") return CODEX_AGENT_ACTOR;
+  const agent = agentActorForId(target);
+  if (agent) return agent;
   if (actor.type !== "user") {
     throw new ApiError(400, "INVALID_FIELD", "'current-user' requires a user request identity");
   }

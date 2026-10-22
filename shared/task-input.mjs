@@ -1,4 +1,5 @@
 import { DEFAULT_PROJECT_ID, isTaskStatus } from "./domain.mjs";
+import { agentSessionPlatforms, agentSessionIdMaxLength } from "./agents.mjs";
 import {
   ApiError, assertPlainObject, assertAllowedKeys, stringField,
   parseVersion, validateProjectId, parseThreadId, parseAssigneeTarget,
@@ -10,11 +11,12 @@ export function parseAgentSession(value) {
   if (value === undefined || value === null) return value;
   assertPlainObject(value);
   assertAllowedKeys(value, new Set(["platform", "sessionId"]));
-  if (!["claude", "pi", "agy", "grok"].includes(value.platform)) {
-    throw new ApiError(400, "INVALID_FIELD", "agentSession.platform must be claude, pi, agy, or grok");
+  const platforms = agentSessionPlatforms();
+  if (!platforms.includes(value.platform)) {
+    throw new ApiError(400, "INVALID_FIELD", `agentSession.platform must be one of ${platforms.join(", ")}`);
   }
   const { platform, sessionId } = value;
-  const maxLength = platform === "pi" ? 4096 : 256;
+  const maxLength = agentSessionIdMaxLength(platform);
   if (
     typeof sessionId !== "string"
     || sessionId.trim().length === 0

@@ -7,6 +7,7 @@ import {
   parseCloudProjectReadmeSave as parseProjectReadmeSave,
 } from "../../shared/task-input.mjs";
 import { taskRelationsQuery, taskRelationsFromRows } from "../../shared/task-relations.mjs";
+import { agentDefinition, agentDefinitionById } from "../../shared/agents.mjs";
 import {
   commentConversationTitle,
   agentSessionFromRow,
@@ -317,11 +318,16 @@ async function authenticate(request, env) {
   }
   const userId = `basic:${encodeURIComponent(username.toLowerCase())}`;
   if (request.headers.get("x-taskboard-client") === "taskctl") {
+    const platform = request.headers.get("x-taskboard-agent-platform") ?? "codex";
+    const definition = agentDefinition(platform);
+    if (!definition) {
+      throw new ApiError(400, "INVALID_ACTOR", `Unsupported agent platform '${platform}'`);
+    }
     return {
       actor: {
         type: "agent",
-        id: `${userId}:codex-agent`,
-        name: `Codex Agent (${username})`,
+        id: `${userId}:${definition.id}`,
+        name: `${definition.name} (${username})`,
         avatarUrl: null,
         username,
       },
@@ -342,11 +348,15 @@ async function authenticate(request, env) {
 
 function resolveAssignee(target, actor) {
   if (target === undefined || target === "current-user") return actor;
+  const definition = agentDefinitionById(target);
+  if (!definition) {
+    throw new ApiError(400, "INVALID_FIELD", `Unknown agent assignee '${target}'`);
+  }
   const userId = `basic:${encodeURIComponent(actor.username.toLowerCase())}`;
   return {
     type: "agent",
-    id: `${userId}:codex-agent`,
-    name: `Codex Agent (${actor.username})`,
+    id: `${userId}:${definition.id}`,
+    name: `${definition.name} (${actor.username})`,
     avatarUrl: null,
   };
 }

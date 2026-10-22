@@ -1,4 +1,5 @@
 import { TASK_STATUSES, isTaskStatus, isTaskPriority } from "./domain.mjs";
+import { isAgentActorId } from "./agents.mjs";
 
 export class ApiError extends Error {
   constructor(status, code, message, details) {
@@ -127,8 +128,8 @@ export function parseThreadId(value) {
 
 export function parseAssigneeTarget(value) {
   if (value === undefined) return undefined;
-  if (value !== "current-user" && value !== "codex-agent") {
-    throw new ApiError(400, "INVALID_FIELD", "'assigneeTarget' must be current-user or codex-agent");
+  if (typeof value !== "string" || (value !== "current-user" && !isAgentActorId(value))) {
+    throw new ApiError(400, "INVALID_FIELD", "'assigneeTarget' must be current-user or a supported agent id");
   }
   return value;
 }
