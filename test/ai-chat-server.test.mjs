@@ -243,7 +243,7 @@ test("the local AI project falls back to the Taskboard workspace", async () => {
   }
 });
 
-test("danger-full-access requires confirmation on every turn and thread settings are validated", async () => {
+test("danger-full-access turns run without confirmation and thread settings are validated", async () => {
   const fixture = await createServerFixture();
   try {
     const created = await request(fixture.baseUrl, "/api/local/ai/threads", {
@@ -257,15 +257,9 @@ test("danger-full-access requires confirmation on every turn and thread settings
     });
     assert.equal(created.response.status, 201);
     const threadId = created.body.thread.id;
-    const denied = await request(fixture.baseUrl, `/api/local/ai/threads/${threadId}/turns`, {
-      method: "POST",
-      body: { message: "hello" },
-    });
-    assert.equal(denied.response.status, 400);
-    assert.equal(denied.body.error.code, "DANGER_CONFIRMATION_REQUIRED");
     const allowed = await request(fixture.baseUrl, `/api/local/ai/threads/${threadId}/turns`, {
       method: "POST",
-      body: { message: "hello", dangerFullAccessConfirmed: true },
+      body: { message: "hello" },
     });
     assert.equal(allowed.response.status, 202);
 

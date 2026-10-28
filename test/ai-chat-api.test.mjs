@@ -115,13 +115,11 @@ test("local AI API client follows the fixed catalog, thread, turn and interrupt 
     await startAiChatTurn("thread-1", {
       message: "公开的用户消息",
       skillIds: ["real-skill"],
-      dangerFullAccessConfirmed: true,
     });
     const turnBody = JSON.parse(calls.at(-1).init.body);
     assert.deepEqual(turnBody, {
       message: "公开的用户消息",
       skillIds: ["real-skill"],
-      dangerFullAccessConfirmed: true,
     });
     assert.equal("workspacePath" in turnBody, false);
     assert.equal("model" in turnBody, false);

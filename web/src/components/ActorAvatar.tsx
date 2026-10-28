@@ -9,9 +9,10 @@ export function ActorAvatar({
   className?: string;
 }) {
   const image = (actor.type === "agent" ? agentAvatar(actor.id) : undefined) ?? actor.avatarUrl;
+  const initial = image ? "" : " is-initial";
   return (
     <span
-      className={`actor-avatar actor-avatar-${actor.type}${className ? ` ${className}` : ""}`}
+      className={`actor-avatar actor-avatar-${actor.type}${initial}${className ? ` ${className}` : ""}`}
       aria-hidden="true"
       title={actor.name}
     >

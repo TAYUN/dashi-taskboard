@@ -11,6 +11,11 @@ export type AgentPlatformId =
 
 export type AgentActorId = `${AgentPlatformId}-agent`;
 
+export interface AgentAcpDefinition {
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
 export interface AgentDefinition {
   readonly platform: AgentPlatformId;
   readonly id: AgentActorId;
@@ -19,6 +24,7 @@ export interface AgentDefinition {
   readonly avatar?: string;
   readonly resume: string;
   readonly sessionIdMaxLength?: number;
+  readonly acp?: AgentAcpDefinition;
 }
 
 export interface AgentActorIdentity {

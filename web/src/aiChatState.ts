@@ -83,14 +83,12 @@ export function reasoningEffortForModel(
 export function buildTurnInput(
   message: string,
   skillIds: string[],
-  dangerFullAccessConfirmed: boolean,
   attachments: AiChatAttachmentInput[] = [],
 ) {
   return {
     message,
     ...(skillIds.length > 0 ? { skillIds } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
-    ...(dangerFullAccessConfirmed ? { dangerFullAccessConfirmed: true } : {}),
   };
 }
 
@@ -130,7 +128,6 @@ export function serializeComposerDocument(document: ComposerDocument): ComposerD
 export function buildComposerTurnInput(
   document: ComposerDocument,
   revision: string,
-  dangerFullAccessConfirmed: boolean,
   attachments: AiChatAttachmentInput[] = [],
 ): ComposerTurnInput {
   return {
@@ -138,7 +135,6 @@ export function buildComposerTurnInput(
     revision,
     document: serializeComposerDocument(document),
     ...(attachments.length > 0 ? { attachments } : {}),
-    ...(dangerFullAccessConfirmed ? { dangerFullAccessConfirmed: true } : {}),
   };
 }
 
@@ -151,13 +147,6 @@ export function chatPrimaryAction(
   if (blocked) return "disabled";
   if (status === "running") return "stop";
   return message.trim() || hasAttachments ? "send" : "disabled";
-}
-
-export function needsDangerConfirmation(
-  sandbox: AiChatSandbox,
-  confirmed: boolean,
-): boolean {
-  return sandbox === "danger-full-access" && !confirmed;
 }
 
 const VISIBLE_EVENT_TYPES = new Set([

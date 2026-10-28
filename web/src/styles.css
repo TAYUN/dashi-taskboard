@@ -3352,6 +3352,19 @@ kbd {
   background: transparent;
 }
 
+/* Agents without a logo fall back to a filled initial, not transparent text. */
+.actor-avatar-agent.is-initial {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
 .actor-avatar-image {
   display: block;
   width: 100%;
@@ -6753,8 +6766,37 @@ kbd {
   height: 10px;
 }
 
+.ai-chat-model-group {
+  padding: 5px 9px 3px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
 .ai-chat-model-menu-wrap {
   min-width: 0;
+}
+
+.ai-chat-agent-picker {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: 28px;
+  padding: 0 4px;
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.ai-chat-agent-picker select {
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
 }
 
 .ai-chat-menu-wrap > .ai-chat-model-trigger {
@@ -7065,58 +7107,6 @@ kbd {
 .ai-chat-permission-menu > button.is-danger strong,
 .ai-chat-permission-menu > button.is-danger small {
   color: #f05a18;
-}
-
-.ai-chat-confirm-backdrop {
-  position: absolute;
-  z-index: 70;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-  background: rgba(15, 15, 17, 0.28);
-  backdrop-filter: blur(2px);
-}
-
-.ai-chat-confirm {
-  width: min(330px, 100%);
-  padding: 18px;
-  border: 1px solid var(--border-strong);
-  border-radius: 14px;
-  background: var(--surface-raised);
-  box-shadow: var(--dialog-shadow);
-}
-
-.ai-chat-confirm > strong {
-  font-size: 13px;
-  font-weight: 620;
-}
-
-.ai-chat-confirm > p {
-  margin: 7px 0 18px;
-  color: var(--text-secondary);
-  font-size: 10px;
-  line-height: 1.65;
-}
-
-.ai-chat-confirm > div {
-  display: flex;
-  justify-content: flex-end;
-  gap: 7px;
-}
-
-.ai-chat-confirm button {
-  height: 29px;
-  padding: 0 11px;
-  border: 0;
-  border-radius: 7px;
-  background: var(--surface-muted);
-  color: var(--text-primary);
-}
-
-.ai-chat-confirm button.is-danger {
-  background: var(--danger);
-  color: white;
 }
 
 .ai-chat-spinner {

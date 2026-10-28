@@ -28,6 +28,7 @@ const DEFINITIONS = [
     platform: "omp",
     name: "OMP",
     resume: "omp --resume={session}",
+    acp: { command: "omp", args: ["acp"] },
   },
   {
     platform: "cline",

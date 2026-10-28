@@ -13,6 +13,9 @@ import {
   resolveAiWorkspace,
 } from "./ai-chat-catalog.mjs";
 import { CodexAppServer, CodexHostAppServer } from "./codex-app-server.mjs";
+import { AcpAgentServer } from "./acp-agent.mjs";
+import { agentDefinition } from "../shared/agents.mjs";
+import { resolveAgentExecutable } from "../shared/agent-executable.mjs";
 import {
   buildCodexArgs,
   buildCodexPrompt,
@@ -30,6 +33,33 @@ const CODEX_IMAGE_TYPES = new Set([
   "image/png",
   "image/webp",
 ]);
+
+// OMP has no process sandbox; its approval mode is the closest equivalent and is
+// fixed per process, so each sandbox level starts its own ACP process.
+function acpArgsForSandbox(args, sandbox) {
+  if (sandbox === "danger-full-access") return [...args, "--approval-mode=yolo"];
+  if (sandbox === "workspace-write") return [...args, "--approval-mode=write"];
+  return args;
+}
+
+function cappedItemEvent(item) {
+  if (!item || typeof item !== "object") return null;
+  if (item.type === "agentMessage") {
+    return { type: "agent_message", role: "assistant", content: cappedError(item.text), data: {} };
+  }
+  if (item.type === "mcpToolCall") {
+    return {
+      type: "mcp_tool_call",
+      role: item.status === "failed" ? "error" : "activity",
+      content: `${item.server ?? ""}.${item.tool ?? ""}`.replace(/^\.|\.$/g, ""),
+      data: {
+        ...(typeof item.server === "string" ? { server: item.server } : {}),
+        ...(typeof item.tool === "string" ? { tool: item.tool } : {}),
+      },
+    };
+  }
+  return null;
+}
 
 function cappedError(value) {
   const message = value instanceof Error ? value.message : String(value ?? "");
@@ -171,6 +201,23 @@ export class AiChatService {
       }
       return { ...resolved, issue };
     });
+    this.acpAgentFactory = options.acpAgentFactory ?? (({ sandbox } = {}) => {
+      const definition = agentDefinition("omp");
+      if (!definition?.acp) throw new ApiError(400, "INVALID_AGENT", "OMP chat is not configured");
+      const executable = resolveAgentExecutable(definition.acp.command);
+      if (!executable) {
+        throw new ApiError(
+          400,
+          "AI_AGENT_UNAVAILABLE",
+          `Cannot find the ${definition.name} executable '${definition.acp.command}' on PATH`,
+        );
+      }
+      return new AcpAgentServer({
+        executable,
+        args: acpArgsForSandbox(definition.acp.args, sandbox),
+        processEnv: this.processEnv,
+      });
+    });
     this.active = new Map();
     this.listeners = new Map();
     this.completions = new Map();
@@ -268,8 +315,24 @@ export class AiChatService {
     });
   }
 
-  async getCatalog(projectId, resolvedContext, codexTarget) {
+  async #acpCatalog(resolved) {
+    const server = this.acpAgentFactory();
+    try {
+      const catalog = await server.catalog({ cwd: resolved.workspacePath });
+      return {
+        models: catalog.models,
+        skills: [],
+        commands: [],
+        sandboxes: ["read-only", "workspace-write", "danger-full-access"],
+      };
+    } finally {
+      await server.close().catch(() => {});
+    }
+  }
+
+  async getCatalog(projectId, resolvedContext, codexTarget, agent = "codex") {
     const resolved = resolvedContext ?? await this.resolveContext(projectId, undefined, codexTarget);
+    if (agent === "omp") return this.#acpCatalog(resolved);
     if (resolved.codexProjectKind === "remote") {
       const { appServer } = this.#runtimeForTarget(resolved);
       return discoverAppServerAiCatalog({ appServer, workspacePath: resolved.workspacePath });
@@ -348,13 +411,16 @@ export class AiChatService {
       ...response,
       candidates: response.candidates.filter((candidate) => (
         candidate.dispatch?.handlerId !== "compact-conversation"
-        || (thread?.codexThreadId && thread.status !== "running")
+        || (thread?.agent !== "omp" && thread?.codexThreadId && thread.status !== "running")
       )),
     };
   }
 
   async compactThread(threadId) {
     const thread = this.getThread(threadId);
+    if (thread.agent === "omp") {
+      throw new ApiError(400, "AI_CHAT_COMPACT_UNAVAILABLE", "OMP conversations cannot be compacted");
+    }
     if (thread.status === "running") {
       throw new ApiError(409, "AI_CHAT_THREAD_RUNNING", "Cannot compact a running conversation");
     }
@@ -368,7 +434,13 @@ export class AiChatService {
   async createThread(input) {
     const codexTarget = input.codexProjectKind === "remote" ? input : undefined;
     const resolved = await this.resolveContext(input.projectId, input.issueId, codexTarget);
-    const catalog = await this.getCatalog(input.projectId, resolved, codexTarget);
+    const agent = input.agent ?? "codex";
+    if (agent !== "codex" && agent !== "omp") {
+      throw new ApiError(400, "INVALID_AGENT", `Unsupported AI chat agent '${agent}'`);
+    }
+    const catalog = agent === "omp"
+      ? await this.#acpCatalog(resolved)
+      : await this.getCatalog(input.projectId, resolved, codexTarget);
     const model = this.#resolveModel(catalog, input.model);
     const reasoningEffort = input.reasoningEffort ?? model.defaultReasoningEffort;
     this.#validateReasoningEffort(model, reasoningEffort);
@@ -390,6 +462,7 @@ export class AiChatService {
         } : {}),
         ...(issue ? { issueId: issue.id, issueIdentifier: issue.identifier } : {}),
       },
+      agent,
       model: model.slug,
       reasoningEffort,
       sandbox,
@@ -409,6 +482,7 @@ export class AiChatService {
         thread.origin.projectId,
         undefined,
         codexTargetFromOrigin(thread.origin),
+        thread.agent,
       );
       thread = this.getThread(threadId);
       const model = this.#resolveModel(catalog, changes.model ?? thread.model);
@@ -451,13 +525,6 @@ export class AiChatService {
       return this.#startComposerTurn(thread, input);
     }
     this.#validateTurnInput(input);
-    if (thread.sandbox === "danger-full-access" && input.dangerFullAccessConfirmed !== true) {
-      throw new ApiError(
-        400,
-        "DANGER_CONFIRMATION_REQUIRED",
-        "danger-full-access must be confirmed for every turn",
-      );
-    }
 
     const codexTarget = codexTargetFromOrigin(thread.origin);
     const resolved = await this.resolveContext(
@@ -465,6 +532,9 @@ export class AiChatService {
       thread.origin.issueId,
       codexTarget,
     );
+    if (thread.agent === "omp") {
+      return this.#startAcpTurn(thread, input, resolved);
+    }
     const catalog = await this.getCatalog(thread.origin.projectId, resolved, codexTarget);
 
     thread = this.getThread(threadId);
@@ -473,13 +543,6 @@ export class AiChatService {
         409,
         "THREAD_BUSY",
         `AI chat thread '${threadId}' has a running turn`,
-      );
-    }
-    if (thread.sandbox === "danger-full-access" && input.dangerFullAccessConfirmed !== true) {
-      throw new ApiError(
-        400,
-        "DANGER_CONFIRMATION_REQUIRED",
-        "danger-full-access must be confirmed for every turn",
       );
     }
     const model = this.#resolveModel(catalog, thread.model);
@@ -658,6 +721,19 @@ export class AiChatService {
       if (this.active.has(runId)) await this.#finishAppServerRun(active, "interrupted");
       return this.getRun(runId);
     }
+    if (active.kind === "acp") {
+      try {
+        await active.server.interruptTurn({ threadId: active.sessionId });
+      } catch {}
+      const acpCompletion = this.completions.get(runId);
+      if (acpCompletion) {
+        await Promise.race([acpCompletion.catch(() => {}), wait(this.killGraceMs + 25)]);
+      }
+      if (this.active.has(runId)) {
+        await this.#finishAcpRun({ run, active, status: "interrupted" });
+      }
+      return this.getRun(runId);
+    }
     signalProcessGroup(active.child, "SIGTERM");
     const timer = setTimeout(() => {
       if (this.active.has(runId)) signalProcessGroup(active.child, "SIGKILL");
@@ -682,6 +758,8 @@ export class AiChatService {
             turnId: active.turnId,
           }).catch(() => {});
         }
+      } else if (active.kind === "acp") {
+        void active.server.interruptTurn({ threadId: active.sessionId }).catch(() => {});
       } else {
         signalProcessGroup(active.child, "SIGTERM");
       }
@@ -694,7 +772,11 @@ export class AiChatService {
       const settled = Promise.allSettled(completions);
       await Promise.race([settled, wait(this.killGraceMs)]);
       for (const [runId, active] of entries) {
-        if (active.kind !== "app-server" && this.active.has(runId)) {
+        if (
+          active.kind !== "app-server"
+          && active.kind !== "acp"
+          && this.active.has(runId)
+        ) {
           signalProcessGroup(active.child, "SIGKILL");
         }
       }
@@ -905,14 +987,192 @@ export class AiChatService {
     });
   }
 
-  async #startComposerTurn(thread, input) {
-    if (thread.sandbox === "danger-full-access" && input.dangerFullAccessConfirmed !== true) {
-      throw new ApiError(
-        400,
-        "DANGER_CONFIRMATION_REQUIRED",
-        "danger-full-access must be confirmed for every turn",
-      );
+  async #startAcpTurn(thread, input, resolved) {
+    const threadId = thread.id;
+    const attachments = input.attachments ?? [];
+    const { temporaryDirectory, attachmentPaths } = await this.#writeTurnAttachments(attachments);
+    let server;
+    try {
+      server = this.acpAgentFactory({ sandbox: thread.sandbox });
+      const prompt = buildCodexPrompt(thread, {
+        message: input.message,
+        skills: [],
+        attachmentPaths,
+      }, this.manageTaskboardSkillPath);
+
+      const run = this.database.createAiChatRun({ threadId });
+      this.#emit(threadId, { type: "ai.run", run });
+      const userEvent = this.database.insertAiChatEvent({
+        threadId,
+        runId: run.id,
+        type: "user_message",
+        role: "user",
+        content: input.message,
+        ...(attachments.length > 0 ? {
+          data: {
+            attachments: attachments.map(({ filename, contentType, size }) => ({
+              filename,
+              contentType,
+              size,
+            })),
+          },
+        } : {}),
+      });
+      this.#emit(threadId, { type: "ai.event", event: userEvent });
+
+      const active = {
+        kind: "acp",
+        server,
+        threadId,
+        sessionId: thread.codexThreadId,
+        interrupted: false,
+        temporaryDirectory,
+      };
+
+      let settle;
+      const completion = new Promise((resolve) => { settle = resolve; });
+      let settled = false;
+      const finish = (status, error) => {
+        if (settled) return;
+        settled = true;
+        settle({ status, error });
+      };
+
+      let streamedEventId = null;
+      const writeItem = (item) => {
+        const normalized = cappedItemEvent(item);
+        if (!normalized) return;
+        if (normalized.type === "agent_message" && streamedEventId) {
+          const updated = this.database.updateAiChatEvent(streamedEventId, {
+            content: normalized.content,
+          });
+          if (updated) {
+            this.#emit(threadId, { type: "ai.event", event: updated });
+            return;
+          }
+          streamedEventId = null;
+        }
+        const event = this.database.insertAiChatEvent({
+          threadId,
+          runId: run.id,
+          ...normalized,
+        });
+        if (normalized.type === "agent_message") streamedEventId = event.id;
+        this.#emit(threadId, { type: "ai.event", event });
+      };
+
+      server.subscribe((notification) => {
+        if (notification.method === "item/updated") {
+          writeItem(notification.params?.item);
+          return;
+        }
+        if (notification.method === "item/completed") {
+          writeItem(notification.params?.item);
+          if (notification.params?.item?.type === "agentMessage") streamedEventId = null;
+          return;
+        }
+        if (notification.method === "turn/completed") {
+          finish(
+            notification.params?.turn?.status ?? "completed",
+            notification.params?.turn?.error?.message,
+          );
+          return;
+        }
+        if (notification.method === "app-server/terminated") {
+          finish("failed", notification.params?.message);
+        }
+      });
+
+      this.active.set(run.id, active);
+      void (async () => {
+        const session = thread.codexThreadId
+          ? await server.resumeThread({
+            threadId: thread.codexThreadId,
+            cwd: resolved.workspacePath,
+            model: thread.model,
+            sandbox: thread.sandbox,
+          })
+          : await server.startThread({
+            cwd: resolved.workspacePath,
+            model: thread.model,
+            sandbox: thread.sandbox,
+          });
+        const sessionId = session?.thread?.id;
+        if (typeof sessionId !== "string" || !sessionId) {
+          throw new Error("OMP did not provide a session id");
+        }
+        active.sessionId = sessionId;
+        if (sessionId !== thread.codexThreadId) {
+          this.database.updateAiChatThread(threadId, { codexThreadId: sessionId });
+        }
+        await server.startTurn({
+          threadId: sessionId,
+          input: [
+            { type: "text", text: prompt },
+            ...attachments
+              .filter((attachment) => CODEX_IMAGE_TYPES.has(attachment.contentType))
+              .map((attachment) => ({
+                type: "image",
+                url: `data:${attachment.contentType};base64,${attachment.data.toString("base64")}`,
+              })),
+          ],
+          effort: thread.reasoningEffort,
+        });
+      })().catch((error) => {
+        finish("failed", error instanceof Error ? error.message : String(error));
+      });
+
+      const finalization = completion.then(({ status, error }) => this.#finishAcpRun({
+        run,
+        active,
+        status,
+        error,
+      }));
+      this.completions.set(run.id, finalization);
+      void finalization.finally(() => this.completions.delete(run.id)).catch(() => {});
+      return run;
+    } catch (error) {
+      await server?.close().catch(() => {});
+      if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
+      throw error;
     }
+  }
+
+  async #finishAcpRun({ run, active, status, error }) {
+    if (!this.active.delete(run.id)) return this.getRun(run.id);
+    const finalStatus = active.interrupted && status !== "failed" ? "interrupted" : status;
+    let publicError = null;
+    if (finalStatus === "interrupted") publicError = "Interrupted";
+    if (finalStatus === "failed") publicError = cappedError(error) || "The agent turn failed";
+    try {
+      if (finalStatus === "failed") {
+        const errorEvent = this.database.insertAiChatEvent({
+          threadId: active.threadId,
+          runId: run.id,
+          type: "error",
+          role: "error",
+          content: publicError,
+          data: { status: "failed" },
+        });
+        this.#emit(active.threadId, { type: "ai.event", event: errorEvent });
+      }
+      const updated = this.database.updateAiChatRun(run.id, {
+        status: finalStatus,
+        exitCode: null,
+        error: publicError,
+        finishedAt: new Date().toISOString(),
+      });
+      this.#emit(active.threadId, { type: "ai.run", run: updated });
+      return updated;
+    } finally {
+      if (active.temporaryDirectory) {
+        await rm(active.temporaryDirectory, { recursive: true, force: true });
+      }
+      await active.server.close().catch(() => {});
+    }
+  }
+
+  async #startComposerTurn(thread, input) {
 
     const codexTarget = codexTargetFromOrigin(thread.origin);
     const resolved = await this.resolveContext(

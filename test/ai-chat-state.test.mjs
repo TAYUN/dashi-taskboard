@@ -9,7 +9,6 @@ import {
   chatPrimaryAction,
   createAiSnapshotRefreshQueue,
   filterVisibleAiEvents,
-  needsDangerConfirmation,
   normalizeChatSelection,
   parseAiChatComposerFragment,
   patchAiChatSnapshot,
@@ -97,7 +96,7 @@ test("skill composer fragments keep opaque markers aligned with selected real id
 });
 
 test("turn input cannot contain cwd, hidden context, model overrides or arbitrary args", () => {
-  const input = buildTurnInput(`检查 ${AI_CHAT_SKILL_MARKER} LOCAL-103`, ["cloudflare"], false);
+  const input = buildTurnInput(`检查 ${AI_CHAT_SKILL_MARKER} LOCAL-103`, ["cloudflare"]);
   assert.deepEqual(input, {
     message: `检查 ${AI_CHAT_SKILL_MARKER} LOCAL-103`,
     skillIds: ["cloudflare"],
@@ -105,10 +104,7 @@ test("turn input cannot contain cwd, hidden context, model overrides or arbitrar
   assert.equal(JSON.stringify(input).includes("workspacePath"), false);
   assert.equal(JSON.stringify(input).includes("manage-taskboard"), false);
   assert.equal(JSON.stringify(input).includes("model"), false);
-  assert.deepEqual(buildTurnInput("执行", [], true), {
-    message: "执行",
-    dangerFullAccessConfirmed: true,
-  });
+  assert.deepEqual(buildTurnInput("执行", []), { message: "执行" });
 });
 
 test("visible activity keeps only the latest lifecycle item without merging messages", () => {

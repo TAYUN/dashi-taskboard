@@ -260,8 +260,10 @@ export async function getAiChatCatalog(
   projectId: string,
   signal?: AbortSignal,
   codexProjectIdentity?: CodexProjectIdentity | null,
+  agent?: string,
 ): Promise<AiChatCatalog> {
   const query = new URLSearchParams();
+  if (agent && agent !== "codex") query.set("agent", agent);
   if (codexProjectIdentity) {
     query.set("codexProjectId", codexProjectIdentity.codexProjectId);
     query.set("codexProjectKind", codexProjectIdentity.codexProjectKind);
@@ -310,6 +312,7 @@ export async function createAiChatThread(input: {
   projectId: string;
   issueId?: string;
   title?: string;
+  agent?: string;
   model?: string;
   reasoningEffort?: string;
   sandbox?: AiChatSandbox;
@@ -373,7 +376,6 @@ export async function startAiChatTurn(
     message: string;
     skillIds?: string[];
     attachments?: AiChatAttachmentInput[];
-    dangerFullAccessConfirmed?: boolean;
   },
 ): Promise<AiChatRun> {
   const data = await request<{ run: AiChatRun }>(

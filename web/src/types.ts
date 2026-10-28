@@ -257,7 +257,6 @@ export interface ComposerTurnInput {
   contractVersion: typeof COMPOSER_CONTRACT_VERSION;
   revision: string;
   document: ComposerDocument;
-  dangerFullAccessConfirmed?: boolean;
   attachments?: AiChatAttachmentInput[];
 }
 
@@ -295,12 +294,15 @@ export interface AiChatTodoProgress {
   updatedAt: string;
 }
 
+export type AiChatAgent = "codex" | "omp";
+
 export interface AiChatThread {
   id: string;
   title: string;
   status: AiChatThreadStatus;
   origin: AiChatOrigin;
   codexThreadId: string | null;
+  agent: AiChatAgent;
   model: string;
   reasoningEffort: string;
   sandbox: AiChatSandbox;

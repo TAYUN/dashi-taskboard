@@ -1,5 +1,6 @@
 import { composerReferencePersistence, readComposerReferenceId } from "../../../shared/composer-reference.mjs";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -43,7 +44,6 @@ import {
   createAiSnapshotRefreshQueue,
   createComposerDocument,
   filterVisibleAiEvents,
-  needsDangerConfirmation,
   normalizeChatSelection,
   parseAiChatComposerFragment,
   patchAiChatSnapshot,
@@ -51,6 +51,7 @@ import {
   serializeComposerDocument,
 } from "../aiChatState";
 import type {
+  AiChatAgent,
   AiChatCatalog,
   AiChatEvent,
   AiChatAttachmentInput,
@@ -120,14 +121,6 @@ type ComposerPersistedNode = Exclude<
 type ComposerDraftDocument = {
   version: 1;
   nodes: ComposerDraftNode[];
-};
-type PendingDangerInput = {
-  message: string;
-  skillIds: string[];
-  composerDocument?: ComposerDraftDocument;
-  composerRevision?: string;
-  attachments: AiChatAttachmentInput[];
-  clearSubmittedDraft: boolean;
 };
 type ComposerAttachment = AiChatAttachmentInput & {
   id: string;
@@ -219,6 +212,16 @@ const SANDBOX_LABELS: Record<AiChatSandbox, readonly [string, string]> = {
   "workspace-write": ["帮我批准", "Approve selected actions"],
   "danger-full-access": ["完全访问权限", "Full access"],
 };
+// OMP has no approval prompts, so the same three levels use its own wording.
+const OMP_SANDBOX_LABELS: Record<AiChatSandbox, readonly [string, string]> = {
+  "read-only": ["只读规划", "Read-only plan"],
+  "workspace-write": ["允许写文件", "Allow file writes"],
+  "danger-full-access": ["完全放行", "Full access"],
+};
+
+function sandboxLabelsFor(agent: AiChatAgent): Record<AiChatSandbox, readonly [string, string]> {
+  return agent === "omp" ? OMP_SANDBOX_LABELS : SANDBOX_LABELS;
+}
 
 function clampPanelGeometry(geometry: PanelGeometry): PanelGeometry {
   const maxWidth = Math.min(
@@ -256,6 +259,16 @@ const SANDBOX_DESCRIPTIONS: Record<AiChatSandbox, readonly [string, string]> = {
   "workspace-write": ["仅对检测到的风险操作请求批准", "Ask only for operations that are detected as risky"],
   "danger-full-access": ["不受限制地访问互联网和您电脑上的任何文件", "Access the internet and any file on your computer without restrictions"],
 };
+// OMP maps these levels to its own approval modes, so the wording has to match.
+const OMP_SANDBOX_DESCRIPTIONS: Record<AiChatSandbox, readonly [string, string]> = {
+  "read-only": ["以只读规划模式运行，不修改文件", "Runs in read-only plan mode without editing files"],
+  "workspace-write": ["允许写文件和执行命令，不逐项询问", "Allows file writes and commands without asking each time"],
+  "danger-full-access": ["全部自动批准，不做任何限制", "Auto-approves everything with no restrictions"],
+};
+
+function sandboxDescriptionsFor(agent: AiChatAgent) {
+  return agent === "omp" ? OMP_SANDBOX_DESCRIPTIONS : SANDBOX_DESCRIPTIONS;
+}
 
 function SandboxIcon({ sandbox }: { sandbox: AiChatSandbox }) {
   if (sandbox === "read-only") return <ReadOnlyPermissionIcon color="currentColor" />;
@@ -264,6 +277,8 @@ function SandboxIcon({ sandbox }: { sandbox: AiChatSandbox }) {
 }
 
 const EFFORT_LABELS: Record<string, readonly [string, string]> = {
+  off: ["关闭", "Off"],
+  auto: ["自动", "Auto"],
   low: ["低", "Low"],
   medium: ["中", "Medium"],
   high: ["高", "High"],
@@ -1266,9 +1281,9 @@ export function AiChat({
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(0);
   const [slashQueryBlocked, setSlashQueryBlocked] = useState(false);
   const [composerSkillTokens, setComposerSkillTokens] = useState<ComposerSkillToken[]>([]);
-  const [pendingDangerInput, setPendingDangerInput] = useState<PendingDangerInput | null>(null);
   const [unread, setUnread] = useState(false);
   const [draftModel, setDraftModel] = useState("");
+  const [draftAgent, setDraftAgent] = useState<AiChatAgent>("codex");
   const [draftEffort, setDraftEffort] = useState("");
   const [draftSandbox, setDraftSandbox] = useState<AiChatSandbox>("workspace-write");
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -1296,7 +1311,6 @@ export function AiChat({
   const snapshotRequestRef = useRef(0);
   const snapshotLoadingRequestRef = useRef(0);
   const observedRunStatusesRef = useRef(new Map<string, AiChatRun["status"]>());
-  const dangerConfirmOpen = pendingDangerInput !== null;
   const openThreadRequestId = openThreadRequest && "threadId" in openThreadRequest
     ? openThreadRequest.requestId
     : null;
@@ -1597,7 +1611,13 @@ export function AiChat({
       : projectId === catalogProjectId
         ? codexProjectIdentity
         : null;
-  const activeCatalog = catalogLoadedProjectId === catalogProjectId ? catalog : null;
+  const catalogAgent: AiChatAgent = snapshot?.thread.agent
+    ?? selectedThreadSummary?.agent
+    ?? draftAgent;
+  const agentLabel = catalogAgent === "omp" ? "OMP" : "Codex";
+  const activeCatalog = catalogLoadedProjectId === `${catalogProjectId}:${catalogAgent}`
+    ? catalog
+    : null;
   useEffect(() => {
     if (!available || !catalogProjectId) {
       setCatalog(null);
@@ -1609,11 +1629,16 @@ export function AiChat({
     setCatalog(null);
     setCatalogLoadedProjectId(null);
     setCatalogError(null);
-    void getAiChatCatalog(catalogProjectId, controller.signal, catalogCodexProjectIdentity).then(
+    void getAiChatCatalog(
+      catalogProjectId,
+      controller.signal,
+      catalogCodexProjectIdentity,
+      catalogAgent,
+    ).then(
       (next) => {
         if (controller.signal.aborted) return;
         setCatalog(next);
-        setCatalogLoadedProjectId(catalogProjectId);
+        setCatalogLoadedProjectId(`${catalogProjectId}:${catalogAgent}`);
         setCatalogError(null);
       },
       (nextError) => {
@@ -1629,6 +1654,7 @@ export function AiChat({
   }, [
     available,
     catalogProjectId,
+    catalogAgent,
     catalogCodexProjectIdentity?.codexHostId,
     catalogCodexProjectIdentity?.codexProjectId,
     catalogCodexProjectIdentity?.codexProjectKind,
@@ -1689,6 +1715,7 @@ export function AiChat({
   ]);
 
   const restoreDraftSettings = useCallback((thread: AiChatThread) => {
+    setDraftAgent(thread.agent);
     setDraftModel(thread.model);
     setDraftEffort(thread.reasoningEffort);
     setDraftSandbox(thread.sandbox);
@@ -1744,6 +1771,19 @@ export function AiChat({
     [visibleComposerCandidates],
   );
   const selectedModel = activeCatalog?.models.find((model) => model.slug === draftModel) ?? null;
+  const modelGroups = useMemo(() => {
+    const groups = new Map<string, AiChatModel[]>();
+    for (const model of activeCatalog?.models ?? []) {
+      const slash = model.slug.indexOf("/");
+      const provider = slash > 0 ? model.slug.slice(0, slash) : "";
+      const list = groups.get(provider) ?? [];
+      list.push(model);
+      groups.set(provider, list);
+    }
+    return [...groups.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([provider, models]) => ({ provider, models }));
+  }, [activeCatalog]);
   const availableSandboxes = (activeCatalog?.sandboxes ?? []).filter(isAiChatSandbox);
   const currentRun = snapshot?.thread.currentRun
     ?? snapshot?.runs.find((run) => run.status === "running")
@@ -1818,7 +1858,6 @@ export function AiChat({
     setSlashQueryBlocked(false);
     composerQueryRangeRef.current = null;
     dismissedComposerQueryRef.current = null;
-    setPendingDangerInput(null);
     setAttachmentDragActive(false);
     setRequestedComposerText(null);
     taskComposerDraftOriginRef.current = null;
@@ -1969,9 +2008,14 @@ export function AiChat({
     };
     setLoading(true);
     try {
-      const targetCatalog = catalogLoadedProjectId === input.projectId && activeCatalog
+      const targetCatalog = catalogLoadedProjectId === `${input.projectId}:${draftAgent}` && activeCatalog
         ? activeCatalog
-        : await getAiChatCatalog(input.projectId, undefined, origin?.codexProjectIdentity);
+        : await getAiChatCatalog(
+          input.projectId,
+          undefined,
+          origin?.codexProjectIdentity,
+          draftAgent,
+        );
       const normalized = normalizeChatSelection(
         targetCatalog.models,
         inheritedSettings.model,
@@ -1989,6 +2033,7 @@ export function AiChat({
       };
       const thread = await createAiChatThread({
         ...input,
+        agent: draftAgent,
         ...settings,
         ...(origin?.codexProjectIdentity ?? {}),
       });
@@ -2303,10 +2348,22 @@ export function AiChat({
     composerQueryRangeRef.current = null;
     dismissedComposerQueryRef.current = null;
     syncComposerState();
-    if (candidate.dispatch.handlerId === "new-conversation") beginNewConversation();
-    else if (candidate.dispatch.handlerId === "open-model-menu") setMenu("model-list");
-    else if (candidate.dispatch.handlerId === "open-reasoning-menu") setMenu("effort-list");
-    else if (candidate.dispatch.handlerId === "compact-conversation" && selectedThreadId) {
+    if (candidate.selection?.type === "insertText") {
+      const textNode = editor.ownerDocument.createTextNode(candidate.selection.text);
+      range.insertNode(textNode);
+      range.setStartAfter(textNode);
+      range.collapse(true);
+      const selection = editor.ownerDocument.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      syncComposerState();
+      editor.focus();
+      return;
+    }
+    if (candidate.dispatch?.handlerId === "new-conversation") beginNewConversation();
+    else if (candidate.dispatch?.handlerId === "open-model-menu") setMenu("model-list");
+    else if (candidate.dispatch?.handlerId === "open-reasoning-menu") setMenu("effort-list");
+    else if (candidate.dispatch?.handlerId === "compact-conversation" && selectedThreadId) {
       setLoading(true);
       void compactAiChatThread(selectedThreadId).then((thread) => {
         replaceThread(thread);
@@ -2326,7 +2383,6 @@ export function AiChat({
 
   async function startMessage(
     message: string,
-    dangerConfirmed: boolean,
     boundSkillIds?: string[],
     clearSubmittedDraft = true,
     boundAttachments?: AiChatAttachmentInput[],
@@ -2399,26 +2455,11 @@ export function AiChat({
     )).map((attachment) => attachment.id));
     if (!trimmed && messageAttachments.length === 0) return;
     let thread = snapshot?.thread ?? null;
-    const messageSandbox = thread?.sandbox ?? draftSandbox;
-    if (needsDangerConfirmation(messageSandbox, dangerConfirmed)) {
-      setPendingDangerInput({
-        message: trimmed,
-        skillIds: submittedSkillIds,
-        ...(useComposerTurn && currentComposerDocument ? {
-          composerDocument: currentComposerDocument,
-          ...(currentComposerRevision ? { composerRevision: currentComposerRevision } : {}),
-        } : {}),
-        attachments: messageAttachments,
-        clearSubmittedDraft,
-      });
-      return;
-    }
     if (!thread) thread = await createThreadForDraftOrigin();
     if (!thread) return;
     const messageSkillIds = (
       boundSkillIds !== undefined || catalogLoadedProjectId === thread.origin.projectId
     ) ? submittedSkillIds : [];
-    setPendingDangerInput(null);
     setError(null);
     setSending(true);
     try {
@@ -2469,7 +2510,6 @@ export function AiChat({
         ? buildComposerTurnInput(
             resolvedComposerDocument,
             currentComposerRevision,
-            dangerConfirmed,
             messageAttachments,
           )
         : null;
@@ -2478,7 +2518,6 @@ export function AiChat({
         : await startAiChatTurn(thread.id, buildTurnInput(
             trimmed,
             messageSkillIds,
-            dangerConfirmed,
             messageAttachments,
           ));
       if (clearSubmittedDraft && selectedThreadRef.current === thread.id) {
@@ -2747,7 +2786,7 @@ export function AiChat({
     if (event.key === "Enter") {
       if (primaryAction === "stop") return;
       event.preventDefault();
-      if (primaryAction === "send") void startMessage(draft, false);
+      if (primaryAction === "send") void startMessage(draft);
     }
   }
 
@@ -2765,8 +2804,8 @@ export function AiChat({
           ref={panelRef}
           className={`ai-chat-panel${panelResizeEdge ? ` is-resizing-${panelResizeEdge}` : ""}`}
           style={panelGeometry ?? undefined}
-          aria-label={text("Codex AI 对话", "Codex AI chat")}
-          data-screen-label={text("Codex AI 对话", "Codex AI chat")}
+          aria-label={text(`${agentLabel} AI 对话`, `${agentLabel} AI chat`)}
+          data-screen-label={text(`${agentLabel} AI 对话`, `${agentLabel} AI chat`)}
         >
           <div
             className="ai-chat-resize-handle is-top"
@@ -2786,11 +2825,33 @@ export function AiChat({
           <header className="ai-chat-panel-header">
             <div className="ai-chat-panel-title">
               <strong>{snapshot?.thread.title ?? text("新对话", "New chat")}</strong>
-              <span>{snapshot?.thread.origin.projectName ?? text(
-                "选择对话或从当前项目新建",
-                "Select a chat or start one in the current project",
-              )}</span>
+              <span>{snapshot?.thread
+                ? `${snapshot.thread.origin.projectName ?? ""}${
+                  snapshot.thread.agent === "omp" ? " · OMP" : ""
+                }`
+                : text(
+                  "选择对话或从当前项目新建",
+                  "Select a chat or start one in the current project",
+                )}</span>
             </div>
+              <label className="ai-chat-agent-picker">
+                <select
+                  value={catalogAgent}
+                  onChange={(event) => {
+                    const next = event.target.value as AiChatAgent;
+                    if (next === catalogAgent) return;
+                    if (snapshot?.thread) beginNewConversation();
+                    setDraftAgent(next);
+                  }}
+                  aria-label={text("选择智能体", "Choose agent")}
+                  title={snapshot?.thread
+                    ? text("切换智能体会新建对话", "Switching agents starts a new chat")
+                    : undefined}
+                >
+                  <option value="codex">Codex</option>
+                  <option value="omp">OMP</option>
+                </select>
+              </label>
             <button
               type="button"
               aria-label={text("对话历史", "Chat history")}
@@ -2889,7 +2950,7 @@ export function AiChat({
                 {snapshot.thread.status === "running" && (
                   <div className="ai-chat-running" role="status">
                     <span className="ai-chat-spinner" />
-                    {text("Codex 正在处理", "Codex is working")}
+                    {text(`${agentLabel} 正在处理`, `${agentLabel} is working`)}
                   </div>
                 )}
                 {retryableUserEvent && (
@@ -2899,7 +2960,6 @@ export function AiChat({
                     onClick={() => {
                       void startMessage(
                         retryableUserEvent.content,
-                        false,
                         eventSkillIds(retryableUserEvent),
                         false,
                         [],
@@ -2918,10 +2978,15 @@ export function AiChat({
                   ? text("在当前项目中开始对话", "Start a chat in the current project")
                   : text("打开一个历史对话", "Open a chat from history")}</strong>
                 <p>{projectId
-                  ? text(
-                    "Codex 会在新对话创建时记住当前项目。",
-                    "Codex will remember the current project when it creates the new chat.",
-                  )
+                  ? catalogAgent === "omp"
+                    ? text(
+                      "OMP 会在新对话创建时使用当前项目的目录。",
+                      "OMP will use the current project directory for the new chat.",
+                    )
+                    : text(
+                      "Codex 会在新对话创建时记住当前项目。",
+                      "Codex will remember the current project when it creates the new chat.",
+                    )
                   : text("进入项目后可以新建对话。", "Open a project to start a new chat.")}</p>
               </div>
             )}
@@ -2985,9 +3050,11 @@ export function AiChat({
                 ref={editorRef}
                 className="ai-chat-composer-editor"
                 contentEditable={!composerBlocked}
-                data-placeholder={text("询问 Codex", "Ask Codex")}
+                data-placeholder={catalogAgent === "omp"
+                  ? text("询问 OMP", "Ask OMP")
+                  : text("询问 Codex", "Ask Codex")}
                 role="textbox"
-                aria-label={text("发送给 Codex 的消息", "Message to Codex")}
+                aria-label={text(`发送给 ${agentLabel} 的消息`, `Message to ${agentLabel}`)}
                 aria-multiline="true"
                 aria-autocomplete="list"
                 aria-controls={composerQueryState ? "ai-chat-composer-candidates" : undefined}
@@ -3158,7 +3225,7 @@ export function AiChat({
                   onClick={() => setMenu((current) => current === "sandbox" ? null : "sandbox")}
                 >
                   <SandboxIcon sandbox={draftSandbox} />
-                  {text(...SANDBOX_LABELS[draftSandbox])}
+                  {text(...sandboxLabelsFor(catalogAgent)[draftSandbox])}
                   <LinearIcon name="chevronDown" />
                 </button>
                 {menu === "sandbox" && (
@@ -3168,7 +3235,10 @@ export function AiChat({
                     aria-label={text("执行权限", "Execution permissions")}
                   >
                     <header>
-                      <span>{text("应如何批准 Codex 操作？", "How should Codex operations be approved?")}</span>
+                      <span>{text(
+                        `${agentLabel} 的操作应如何批准？`,
+                        `How should ${agentLabel} operations be approved?`,
+                      )}</span>
                       <a
                         href="https://developers.openai.com/codex/security"
                         target="_blank"
@@ -3188,8 +3258,8 @@ export function AiChat({
                       >
                         <SandboxIcon sandbox={sandbox} />
                         <span>
-                          <strong>{text(...SANDBOX_LABELS[sandbox])}</strong>
-                          <small>{text(...SANDBOX_DESCRIPTIONS[sandbox])}</small>
+                          <strong>{text(...sandboxLabelsFor(catalogAgent)[sandbox])}</strong>
+                          <small>{text(...sandboxDescriptionsFor(catalogAgent)[sandbox])}</small>
                         </span>
                         {sandbox === draftSandbox && <LinearIcon name="check" />}
                       </button>
@@ -3263,19 +3333,27 @@ export function AiChat({
                       </button>
                       <strong>{text("模型", "Model")}</strong>
                     </header>
-                    {(activeCatalog?.models ?? []).map((model) => (
-                      <button
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={model.slug === draftModel}
-                        key={model.slug}
-                        onClick={() => void chooseModel(model)}
-                      >
-                        <span>
-                          <strong>{modelDisplayName(model.displayName)}</strong>
-                        </span>
-                        {model.slug === draftModel && <LinearIcon name="check" />}
-                      </button>
+                    {modelGroups.map(({ provider, models }) => (
+                      <Fragment key={provider || "default"}>
+                        {provider ? (
+                          <div className="ai-chat-model-group">{provider}</div>
+                        ) : null}
+                        {models.map((model) => (
+                          <button
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={model.slug === draftModel}
+                            key={model.slug}
+                            title={model.slug}
+                            onClick={() => void chooseModel(model)}
+                          >
+                            <span>
+                              <strong>{modelDisplayName(model.displayName)}</strong>
+                            </span>
+                            {model.slug === draftModel && <LinearIcon name="check" />}
+                          </button>
+                        ))}
+                      </Fragment>
                     ))}
                   </div>
                 )}
@@ -3333,7 +3411,7 @@ export function AiChat({
                     || settingsSaving
                     || Boolean(catalogError)
                   }
-                  onClick={() => void startMessage(draft, false)}
+                  onClick={() => void startMessage(draft)}
                 >
                   <SendIcon color="currentColor" />
                 </button>
@@ -3341,40 +3419,6 @@ export function AiChat({
             </div>
           </div>
 
-          {dangerConfirmOpen && (
-            <div className="ai-chat-confirm-backdrop">
-              <div className="ai-chat-confirm" role="alertdialog" aria-modal="true" aria-labelledby="ai-chat-confirm-title">
-                <strong id="ai-chat-confirm-title">{text("允许完全访问？", "Allow full access?")}</strong>
-                <p>{text(
-                  "本次消息允许 Codex 访问工作区之外的文件和命令。确认只对本次发送生效。",
-                  "This message lets Codex access files and commands outside the workspace. This approval applies only to this message.",
-                )}</p>
-                <div>
-                  <button type="button" onClick={() => setPendingDangerInput(null)}>
-                    {text("取消", "Cancel")}
-                  </button>
-                  <button
-                    className="is-danger"
-                    type="button"
-                    onClick={() => {
-                      if (!pendingDangerInput) return;
-                      void startMessage(
-                        pendingDangerInput.message,
-                        true,
-                        pendingDangerInput.skillIds,
-                        pendingDangerInput.clearSubmittedDraft,
-                        pendingDangerInput.attachments,
-                        pendingDangerInput.composerDocument,
-                        pendingDangerInput.composerRevision,
-                      );
-                    }}
-                  >
-                    {text("允许并发送", "Allow and send")}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </section>
       )}
 

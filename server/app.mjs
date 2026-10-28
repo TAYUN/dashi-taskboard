@@ -620,10 +620,12 @@ function parseAiThreadCreate(body) {
     "codexProjectKind",
     "codexHostId",
     "workspacePath",
+    "agent",
   ]));
   return {
     projectId: validateProjectId(body.projectId),
     issueId: parseAiSetting(body.issueId, "issueId", 128),
+    agent: parseAiSetting(body.agent, "agent", 32),
     title: parseAiSetting(body.title, "title", 160),
     model: parseAiSetting(body.model, "model", 128),
     reasoningEffort: parseAiSetting(body.reasoningEffort, "reasoningEffort", 64),
@@ -720,15 +722,8 @@ function parseAiTurn(body) {
   assertAllowedKeys(body, new Set([
     "message",
     "skillIds",
-    "dangerFullAccessConfirmed",
     "attachments",
   ]));
-  if (
-    body.dangerFullAccessConfirmed !== undefined
-    && typeof body.dangerFullAccessConfirmed !== "boolean"
-  ) {
-    throw new ApiError(400, "INVALID_FIELD", "'dangerFullAccessConfirmed' must be a boolean");
-  }
   const message = stringField(body.message ?? "", "message", { maxLength: 100_000 });
   const skillIds = parseAiSkillIds(body.skillIds) ?? [];
   if (message.split(AI_CHAT_SKILL_MARKER).length - 1 !== skillIds.length) {
@@ -745,7 +740,6 @@ function parseAiTurn(body) {
   return {
     message,
     skillIds,
-    dangerFullAccessConfirmed: body.dangerFullAccessConfirmed,
     attachments,
   };
 }
@@ -1084,7 +1078,6 @@ function parseComposerTurn(body) {
     "contractVersion",
     "revision",
     "document",
-    "dangerFullAccessConfirmed",
     "attachments",
   ]));
   if (body.contractVersion !== "composer.v1") {
@@ -1094,17 +1087,10 @@ function parseComposerTurn(body) {
       "'contractVersion' must be 'composer.v1'",
     );
   }
-  if (
-    body.dangerFullAccessConfirmed !== undefined
-    && typeof body.dangerFullAccessConfirmed !== "boolean"
-  ) {
-    throw new ApiError(400, "INVALID_FIELD", "'dangerFullAccessConfirmed' must be a boolean");
-  }
   return {
     contractVersion: "composer.v1",
     revision: stringField(body.revision, "revision", { required: true, maxLength: 512 }),
     document: parseComposerDocument(body.document),
-    dangerFullAccessConfirmed: body.dangerFullAccessConfirmed,
     attachments: parseAiAttachments(body.attachments),
   };
 }
@@ -2120,12 +2106,22 @@ export function createTaskboardServer(options = {}) {
           "codexProjectKind",
           "codexHostId",
           "workspacePath",
+          "agent",
         ]), "GET /api/local/ai/catalog");
         const projectId = validateProjectId(url.searchParams.get("projectId") ?? undefined);
+        const agent = url.searchParams.get("agent") ?? "codex";
+        if (agent !== "codex" && agent !== "omp") {
+          throw new ApiError(400, "INVALID_AGENT", `Unsupported AI chat agent '${agent}'`);
+        }
         return sendJson(
           response,
           200,
-          await aiChat.getCatalog(projectId, undefined, aiExecutionTargetFromQuery(url.searchParams)),
+          await aiChat.getCatalog(
+            projectId,
+            undefined,
+            aiExecutionTargetFromQuery(url.searchParams),
+            agent,
+          ),
         );
       }
 

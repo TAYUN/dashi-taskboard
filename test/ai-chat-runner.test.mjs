@@ -1097,10 +1097,6 @@ test("startTurn revalidates the latest danger sandbox and persisted model settin
   try {
     for (const scenario of [
       {
-        changes: { sandbox: "danger-full-access" },
-        expectedCode: "DANGER_CONFIRMATION_REQUIRED",
-      },
-      {
         changes: { model: "retired-model" },
         expectedCode: "INVALID_MODEL",
       },

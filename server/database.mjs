@@ -232,6 +232,7 @@ function aiChatThreadFromRow(row) {
       ...(row.origin_issue_identifier ? { issueIdentifier: row.origin_issue_identifier } : {}),
     },
     codexThreadId: row.codex_thread_id,
+    agent: row.agent ?? "codex",
     model: row.model,
     reasoningEffort: row.reasoning_effort,
     sandbox: row.sandbox,
@@ -417,6 +418,7 @@ export class TaskboardDatabase {
         origin_issue_id TEXT,
         origin_issue_identifier TEXT,
         codex_thread_id TEXT,
+        agent TEXT NOT NULL DEFAULT 'codex',
         model TEXT NOT NULL,
         reasoning_effort TEXT NOT NULL,
         sandbox TEXT NOT NULL CHECK (sandbox IN (
@@ -474,6 +476,7 @@ export class TaskboardDatabase {
       "origin_codex_project_id",
       "origin_codex_project_kind",
       "origin_codex_host_id",
+      "agent",
     ]) {
       if (!aiChatThreadColumns.some((candidate) => candidate.name === column)) {
         this.database.exec(`ALTER TABLE ai_chat_threads ADD COLUMN ${column} TEXT`);
@@ -1460,9 +1463,9 @@ export class TaskboardDatabase {
         origin_project_id, origin_project_name, origin_workspace_path,
         origin_codex_project_id, origin_codex_project_kind, origin_codex_host_id,
         origin_issue_id, origin_issue_identifier,
-        codex_thread_id, model, reasoning_effort, sandbox,
+        codex_thread_id, agent, model, reasoning_effort, sandbox,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.title,
@@ -1476,6 +1479,7 @@ export class TaskboardDatabase {
       input.origin.issueId ?? null,
       input.origin.issueIdentifier ?? null,
       input.codexThreadId ?? null,
+      input.agent ?? "codex",
       input.model,
       input.reasoningEffort,
       input.sandbox,
@@ -1635,6 +1639,26 @@ export class TaskboardDatabase {
     );
     const row = this.database.prepare("SELECT * FROM ai_chat_events WHERE id = ?").get(id);
     return aiChatEventFromRow(row);
+  }
+
+  updateAiChatEvent(id, changes) {
+    const assignments = [];
+    const values = [];
+    if (changes.content !== undefined) {
+      assignments.push("content = ?");
+      values.push(changes.content);
+    }
+    if (changes.data !== undefined) {
+      assignments.push("data = ?");
+      values.push(changes.data === null ? null : JSON.stringify(changes.data));
+    }
+    if (assignments.length === 0) return null;
+    values.push(id);
+    this.database.prepare(`
+      UPDATE ai_chat_events SET ${assignments.join(", ")} WHERE id = ?
+    `).run(...values);
+    const row = this.database.prepare("SELECT * FROM ai_chat_events WHERE id = ?").get(id);
+    return row ? aiChatEventFromRow(row) : null;
   }
 
   listAiChatEvents(threadId) {
