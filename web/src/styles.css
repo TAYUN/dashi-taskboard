@@ -2391,14 +2391,17 @@ kbd {
   list-style: none;
 }
 
+/* The read-only renderer puts the checkbox and the text side by side without a
+   wrapper element, so the checkbox is taken out of flow instead of using grid. */
 .issue-description-document .task-list-item {
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr);
-  column-gap: 7px;
+  position: relative;
+  padding-left: 21px;
   list-style: none;
 }
 
 .issue-description-document input[type="checkbox"] {
+  position: absolute;
+  left: 0;
   width: 14px;
   height: 14px;
   margin: calc((1lh - 14px) / 2) 0 0;
