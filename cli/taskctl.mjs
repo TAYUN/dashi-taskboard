@@ -1250,11 +1250,14 @@ async function resolveTaskboardBaseUrl(env, overrides) {
   const configuredDescriptorPath = env.CODEX_TASKBOARD_RUNTIME_FILE;
   const isWsl = isWslEnvironment(env);
   const wslRuntimeFile = env.CODEX_TASKBOARD_WSL_RUNTIME_FILE;
+  // A web-hosted board never writes the launcher descriptor, so an inherited
+  // CODEX_TASKBOARD_RUNTIME_FILE can point at a file that does not exist. Fall
+  // through to the default loopback origin instead of failing every command.
   const descriptorCandidates = configuredDescriptorPath !== undefined
     ? [{
       path: configuredDescriptorPath,
       read: overrides.readFile ?? readFile,
-      required: true,
+      required: false,
       windowsTransport: false,
     }]
     : isWsl && wslRuntimeFile !== undefined
